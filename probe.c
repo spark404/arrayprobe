@@ -75,7 +75,7 @@ cciss_get_event (int device_fd, int reset_pointer, cciss_event_type * event)
 	iocommand.Request.CDB[4] = 0x0;
 	iocommand.Request.CDB[5] = 0x0;
 	iocommand.Request.CDB[6] = 0x0;
-	iocommand.Request.CDB[7] = (reset_pointer) ? 0x3 : 0x7;	/* bit 2 set = reset pointer, bit 0 set = synchronous mode */
+	iocommand.Request.CDB[7] = (reset_pointer) ? 0x7 : 0x3;	/* bit 2 set = reset pointer, bit 0 set = synchronous mode */
 	iocommand.Request.CDB[8] = 0x0;
 	iocommand.Request.CDB[9] = 0x0;
 	iocommand.Request.CDB[10] = 0x2;

@@ -289,7 +289,7 @@ main (int argc, char *argv[])
 	char *filename = NULL;
 	int report_mode = 0;
 	int num_logical_drives = 0;
-	int only_new_events = 0;
+	int reset_event_pointer = 1;
 
 	while ((option = getopt (argc, argv, "f:srho")) != EOF)
 	{
@@ -306,7 +306,7 @@ main (int argc, char *argv[])
 			report_mode = 1;
 			break;
 		case 'o':
-		  only_new_events = 1;
+		  reset_event_pointer = 0;
 		  break;
 		case 'h':
 		default:
@@ -357,11 +357,11 @@ main (int argc, char *argv[])
 	  {
 	    if (simulate)
 	      {
-		cciss_simulate_get_event (fd, only_new_events && first_time, &event);
+		cciss_simulate_get_event (fd, reset_event_pointer && first_time, &event);
 	      }
 	    else
 	      {
-		cciss_get_event (fd, only_new_events && first_time, &event);
+		cciss_get_event (fd, reset_event_pointer && first_time, &event);
 	      }
 	    if (CompareEvent(event, 5,0,0)) {
 	      /* i'm only interested in logical drive state for now */

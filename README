@@ -1,3 +1,11 @@
 Arrayprobe
 
 use this to check the status of a HP (compaq) arraycontroller. Currently it only works with a controller using the cciss driver.
+
+
+
+TODO:
+Robert says:
+you asked me for features...at least I would like to get the product name (from the board id)
+drive array size, fault tolerance (RAID etc) and maybe recovery status in % when available
+I dunno, whether it's possible to read serial number. But ROM version/backup rom would be also useful for activity with the HP support

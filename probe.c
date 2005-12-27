@@ -98,7 +98,7 @@ cciss_get_event (int device_fd, int reset_pointer, cciss_event_type * event)
 	 * overrun (1) should not happen anyway and
 	 * underrun (2) is not a problem
 	 */
-	if ((iocommand.error_info.CommandStatus != 1) && (iocommand.error_info.CommandStatus != 2)) {
+	if ((iocommand.error_info.CommandStatus != 1) && (iocommand.error_info.CommandStatus != 2) && (iocommand.error_info.CommandStatus != 0)) {
 	  printf (" * Command failed with Comnmand Status %d\n", iocommand.error_info.CommandStatus);
 	  return -1;
 	}
@@ -159,7 +159,7 @@ cciss_get_logical_luns (int device_fd, cciss_report_logicallun_struct * logluns)
 	 * overrun (1) should not happen anyway and
 	 * underrun (2) is not a problem
 	 */
-	if ((iocommand.error_info.CommandStatus != 1) && (iocommand.error_info.CommandStatus != 2)) {
+	if ((iocommand.error_info.CommandStatus != 1) && (iocommand.error_info.CommandStatus != 2) && (iocommand.error_info.CommandStatus != 0)) {
 	  printf (" * Command failed with Comnmand Status %d\n", iocommand.error_info.CommandStatus);
 	  return -1;
 	}

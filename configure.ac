@@ -21,7 +21,7 @@ AC_CHECK_HEADERS(linux/compiler.h)
                                                                        
 dnl Check for CCISS header file
 AC_CHECK_HEADERS(linux/cciss_ioctl.h,,
-  AC_MSG_ERROR(You need to have the CCISS driver in the kernel.))
+  AC_MSG_ERROR(You need to have the CCISS driver in the kernel.),[[#include <linux/compiler.h>]])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_C_CONST

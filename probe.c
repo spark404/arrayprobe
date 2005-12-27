@@ -37,6 +37,8 @@
 
 #include "cciss_events.h"
 
+#include "config.h"
+
 typedef struct _logdrv_state {
   int state;
   char *message;

@@ -1,1 +1,16 @@
 *.bin
+.deps
+.in
+Makefile.in
+aclocal.m4
+arrayprobe
+autom4te.cache
+ccissprobe
+config.h
+config.h.in
+config.log
+config.status
+configure
+stamp-h1
+Makefile
+

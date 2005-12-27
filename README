@@ -1,0 +1,3 @@
+Arrayprobe
+
+use this to check the status of a HP (compaq) arraycontroller. Currently it only works with a controller using the cciss driver.

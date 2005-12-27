@@ -32,15 +32,21 @@
 #include <malloc.h>
 #include <getopt.h>
 
+#include <linux/compiler.h>
 #include <linux/cciss_ioctl.h>
 
 #include "cciss_events.h"
 
+typedef struct _logdrv_state {
+  int state;
+  char *message;
+  int severity;
+} logdrv_state;
 
 int
 cciss_get_event (int device_fd, int reset_pointer, cciss_event_type * event)
 {
-	int result, outfile;
+  int result;
 	IOCTL_Command_struct iocommand;
 	unsigned char *buffer;
 
@@ -67,7 +73,7 @@ cciss_get_event (int device_fd, int reset_pointer, cciss_event_type * event)
 	iocommand.Request.CDB[4] = 0x0;
 	iocommand.Request.CDB[5] = 0x0;
 	iocommand.Request.CDB[6] = 0x0;
-	iocommand.Request.CDB[7] = (reset_pointer) ? 0x7 : 0x3;	/* 7 = start at oldest, 3 is get current */
+	iocommand.Request.CDB[7] = (reset_pointer) ? 0x3 : 0x7;	/* bit 2 set = reset pointer, bit 0 set = synchronous mode */
 	iocommand.Request.CDB[8] = 0x0;
 	iocommand.Request.CDB[9] = 0x0;
 	iocommand.Request.CDB[10] = 0x2;
@@ -86,32 +92,14 @@ cciss_get_event (int device_fd, int reset_pointer, cciss_event_type * event)
 		return -1;
 	}
 
-	if (iocommand.error_info.CommandStatus == 1) {
-		printf (" * Command succeeded with dataoverrun (code %d)\n", iocommand.error_info.CommandStatus);
+	/* Ignore these errors
+	 * overrun (1) should not happen anyway and
+	 * underrun (2) is not a problem
+	 */
+	if ((iocommand.error_info.CommandStatus != 1) && (iocommand.error_info.CommandStatus != 2)) {
+	  printf (" * Command failed with Comnmand Status %d\n", iocommand.error_info.CommandStatus);
+	  return -1;
 	}
-	else if (iocommand.error_info.CommandStatus == 2) {
-		printf (" * Command succeeded with dataunderrun (code %d)\n", iocommand.error_info.CommandStatus);
-	}
-	else if (iocommand.error_info.CommandStatus != 0)
-	{
-		printf (" * Command failed with Comnmand Status %d\n", iocommand.error_info.CommandStatus);
-		return -1;
-	}
-
-	if (reset_pointer)
-	{
-		outfile =
-			open ("notify.bin", O_WRONLY | O_CREAT | O_TRUNC,
-			      S_IREAD | S_IWRITE);
-	}
-	else
-	{
-		outfile =
-			open ("notify.bin", O_WRONLY | O_CREAT | O_APPEND,
-			      S_IREAD | S_IWRITE);
-	}
-	write (outfile, buffer, 512);
-	close (outfile);
 
 	memcpy (event, buffer, 512);
 	return 0;
@@ -120,7 +108,7 @@ cciss_get_event (int device_fd, int reset_pointer, cciss_event_type * event)
 int
 cciss_get_logical_luns (int device_fd, cciss_report_logicallun_struct * logluns)
 {
-	int result, outfile;
+  int result;
 	IOCTL_Command_struct iocommand;
 	unsigned char *buffer;
 
@@ -165,22 +153,15 @@ cciss_get_logical_luns (int device_fd, cciss_report_logicallun_struct * logluns)
 		return -1;
 	}
 
-	if (iocommand.error_info.CommandStatus == 1) {
-		printf (" * Command succeeded with dataoverrun (code %d)\n", iocommand.error_info.CommandStatus);
-	}
-	else if (iocommand.error_info.CommandStatus == 2) {
-		printf (" * Command succeeded with dataunderrun (code %d)\n", iocommand.error_info.CommandStatus);
-	}
-	else if (iocommand.error_info.CommandStatus != 0)
-	{
-		printf (" * Command failed with Comnmand Status %d\n", iocommand.error_info.CommandStatus);
-		return -1;
+	/* Ignore these errors
+	 * overrun (1) should not happen anyway and
+	 * underrun (2) is not a problem
+	 */
+	if ((iocommand.error_info.CommandStatus != 1) && (iocommand.error_info.CommandStatus != 2)) {
+	  printf (" * Command failed with Comnmand Status %d\n", iocommand.error_info.CommandStatus);
+	  return -1;
 	}
 	
-	outfile = open ("reportLUN.bin", O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE);
-	write (outfile, buffer, 128);
-	close (outfile);
-
  	memcpy (logluns, buffer, 128);
 	return 0;
 }
@@ -274,20 +255,25 @@ cciss_print_event (cciss_event_type event)
 	}
 }
 
-void
-cciss_print_logicalluns(cciss_report_logicallun_struct logluns) {
+int
+cciss_get_num_logicalluns(cciss_report_logicallun_struct logluns) {
   int listlength = 0;
 
   listlength |= (0xff & (unsigned int)(logluns.LUNlist_len[0])) << 24;
   listlength |= (0xff & (unsigned int)(logluns.LUNlist_len[1])) << 16;
   listlength |= (0xff & (unsigned int)(logluns.LUNlist_len[2])) << 8;
   listlength |= (0xff & (unsigned int)(logluns.LUNlist_len[3]));
+  return listlength / 8;
+}
+
+void
+cciss_print_logicalluns(cciss_report_logicallun_struct logluns) {
   printf ("Number of logical volumes (%02X %02X %02X %02X) : %d\n", 
 	  logluns.LUNlist_len[0],
 	  logluns.LUNlist_len[1],
 	  logluns.LUNlist_len[2],
 	  logluns.LUNlist_len[3],
-	  listlength / 8);
+	  cciss_get_num_logicalluns(logluns));
 }
 
 int
@@ -295,13 +281,15 @@ main (int argc, char *argv[])
 {
 	cciss_event_type event;
 	cciss_report_logicallun_struct logluns;
+	logdrv_state *states;
 	int fd, option;
 	int simulate = 0;
 	char *filename = NULL;
+	int report_mode = 0;
+	int num_logical_drives = 0;
+	int only_new_events = 0;
 
-	printf ("CCISS probe\n");
-
-	while ((option = getopt (argc, argv, "f:s")) != EOF)
+	while ((option = getopt (argc, argv, "f:srho")) != EOF)
 	{
 		switch (option)
 		{
@@ -312,20 +300,23 @@ main (int argc, char *argv[])
 		case 's':
 			simulate = 1;
 			break;
-		case 'n':
-			nagios_mode = 1;
+		case 'r':
+			report_mode = 1;
 			break;
+		case 'o':
+		  only_new_events = 1;
+		  break;
 		case 'h':
 		default:
 			printf ("Usage: ccissprobe [-f filename] [-s]\n");
 			printf (" -f <filename>  : device to open\n");
 			printf (" -s             : simultion mode (use with -f)\n");
-			printf (" -n             : nagois check mode\n");
+			printf (" -r             : report mode\n");
+			printf (" -o             : only read new events (since last run)\n");
 			exit (1);
 		}
 	}
 
-	printf (" * opening device.\n");
 	if (filename == NULL)
 	{
 		fd = open ("/dev/cciss/c0d0", O_RDWR);
@@ -339,38 +330,81 @@ main (int argc, char *argv[])
 		perror (" * controller open failed");
 		exit (2);
 	}
-	printf (" * device c0d0 opened.\n");
+	if (report_mode) {
+	  printf ("CCISS probe\n");
+	  printf (" * opening device.\n");
+	  printf (" * device c0d0 opened.\n");
+	}
 
 	if (simulate != 1) {
 	  cciss_get_logical_luns(fd, &logluns);
-	  cciss_print_logicalluns(logluns);
+	  if (report_mode) {
+	    cciss_print_logicalluns(logluns);
+	  }
+	  num_logical_drives = cciss_get_num_logicalluns(logluns);
 	}
+	else {
+	  /* set to 8 logical drives in simulation mode */
+	  num_logical_drives = 8;
+	}
+	states = (logdrv_state *)malloc(num_logical_drives * sizeof(logdrv_state));
+	bzero(states, num_logical_drives * sizeof(logdrv_state));
 
-	if (simulate)
-	{
-		cciss_simulate_get_event (fd, 1, &event);
-	}
-	else
-	{
-		cciss_get_event (fd, 1, &event);
-	}
-	cciss_print_event (event);
-	printf ("\n");
+	int first_time = 1;
+	do 
+	  {
+	    if (simulate)
+	      {
+		cciss_simulate_get_event (fd, only_new_events && first_time, &event);
+	      }
+	    else
+	      {
+		cciss_get_event (fd, only_new_events && first_time, &event);
+	      }
+	    if (CompareEvent(event, 5,0,0)) {
+	      /* i'm only interested in logical drive state for now */
+	      int drivenum = event.detail.logstatchange.logicaldrivenumber;
+	      states[drivenum].state = event.detail.logstatchange.newlogicaldrivestate;
+	      states[drivenum].severity = logicaldrivestatusseverity[event.detail.logstatchange.newlogicaldrivestate];
+	      states[drivenum].message = (char *)malloc(strlen(logicaldrivestatusstr[event.detail.logstatchange.newlogicaldrivestate] + 1));
+	      strcpy (states[drivenum].message, logicaldrivestatusstr[event.detail.logstatchange.newlogicaldrivestate]);
+	    }
+	    if (report_mode) {
+	      cciss_print_event (event);
+	      printf ("\n");
+	    }
+	    first_time = 0;
+	  }
+	while (event.class.class != 0);
 
-	while (event.class.class != 0)
-	{
-		if (simulate)
-		{
-			cciss_simulate_get_event (fd, 0, &event);
-		}
-		else
-		{
-			cciss_get_event (fd, 0, &event);
-		}
-		cciss_print_event (event);
-		printf ("\n");
+
+	/* Nagios part
+	 * nagios wants only one line with a status, so we print the worst situation we can find
+	 * and exit with a corresponding return code
+         */
+	int worst_lun;
+        int worst_sev = SEV_NORMAL;
+	int cntr;
+	for (cntr = 0; cntr<num_logical_drives; cntr++) {
+	  if (states[cntr].state != 0) {
+	    if (states[cntr].severity > worst_sev) {
+	      worst_sev = states[cntr].severity;
+	      worst_lun = cntr;
+	    }
+	  }
 	}
 
 	close (fd);
+
+	if (worst_sev == SEV_CRITICAL) {
+	  printf ("CRITICAL Arrayprobe Logical drive %d: %s\n", worst_lun, states[worst_lun].message);
+	  return 2;
+	}
+	else if (worst_sev == SEV_WARNING) {
+	  printf ("WARNING Arrayprobe Logical drive %d: %s\n", worst_lun, states[worst_lun].message);
+	  return 1;
+	}
+
+	printf ("OK Arrayprobe All drives ok\n");
 	return 0;
 }

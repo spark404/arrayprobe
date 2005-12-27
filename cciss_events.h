@@ -199,6 +199,26 @@ const char *logicaldrivestatusstr[] = {
         "Logical drive is queued for expansion",
 };
 
+#define SEV_CRITICAL 2
+#define SEV_WARNING 1
+#define SEV_NORMAL 0
+
+const int logicaldrivestatusseverity[] = {
+        SEV_NORMAL,
+        SEV_CRITICAL,
+        SEV_WARNING,
+        SEV_CRITICAL,
+        SEV_WARNING,
+        SEV_WARNING,
+        SEV_CRITICAL,
+        SEV_CRITICAL,
+        SEV_CRITICAL,
+        SEV_CRITICAL,
+        SEV_WARNING,
+        SEV_WARNING,
+        SEV_WARNING
+};
+
 const char *sparestatusstr[] = {
 	"online",
 };

@@ -311,8 +311,8 @@ main (int argc, char *argv[])
 		case 'h':
 		default:
 			printf ("Usage: ccissprobe [-f filename] [-s]\n");
-			printf (" -f <filename>  : device to open\n");
-			printf (" -s             : simultion mode (use with -f)\n");
+			printf (" -f <device>  : device to open\n");
+			/* printf (" -s             : simultion mode (use with -f)\n"); */
 			printf (" -r             : report mode\n");
 			printf (" -o             : only read new events (since last run)\n");
 			exit (1);

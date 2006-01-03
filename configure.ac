@@ -18,6 +18,34 @@ AC_CHECK_HEADERS([arpa/inet.h fcntl.h netdb.h netinet/in.h stdlib.h string.h sys
 
 dnl Check for compile.h (2.6.x kernels only?
 AC_CHECK_HEADERS(linux/compiler.h)
+
+dnl Check for kernel sources
+AC_MSG_CHECKING(for kernel sources)
+found_kernel_dir=""
+for kernel_dir in /usr/src/linux /usr/src/linux-2.4
+do
+  if test -d $kernel_dir/drivers/block ; then
+    CFLAGS="$CFLAGS -I$kernel_dir/include -I$kernel_dir/drivers/block"
+    CPPFLAGS="$CPPFLAGS -I$kernel_dir/include -I$kernel_dir/drivers/block"
+    found_kernel_dir="$kernel_dir"
+  fi
+done
+
+if test "$found_kernel_dir" != "" ; then
+  AC_MSG_RESULT(found $found_kernel_dir )
+else
+  AC_MSG_ERROR(Kernel sources not found)
+fi
+
+dnl Check Headers
+AC_CHECK_HEADERS(ida_ioctl.h ida_cmd.h cpqarray.h,,
+  AC_MSG_ERROR(You need to have the complete kernel sources.),[[#include <linux/compiler.h>
+  #include <unistd.h>]])
+
+dnl Check version of SmartArray driver
+AC_MSG_CHECKING(SmartArray driver version)
+AC_EGREP_HEADER(blk_cnt, ida_ioctl.h,AC_MSG_RESULT(ok),
+  AC_MSG_ERROR(You need to have the SmartArray driver version 1.0.1 or higher installed.))
                                                                        
 dnl Check for CCISS header file
 AC_CHECK_HEADERS(linux/cciss_ioctl.h,,

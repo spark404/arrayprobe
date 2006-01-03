@@ -1,11 +1,16 @@
 Arrayprobe
 
-use this to check the status of a HP (compaq) arraycontroller. Currently it only works with a controller using the cciss driver.
+use this to check the status of a HP (compaq) arraycontroller.
 
+By default it runs in a non verbose mode that can be used as a nagios check. The output is a single line of information about the worst state found. (If one logical drive is recovering and a second drive is in interim recovery mode. It will only report the failing drive.) The exitcodes can be used to determine the severity. Critical = 2; Warning = 1; Normal = 0
+
+With the -r flag it prints details information on what is going on and it prints the complete cciss event history.
+
+Use the -f flag to specify which device to check for problems. If the device is controlled by the ida driver, put the -i flag on the commandline. Without -f it will check both /dev/cciss/c0d0 (cciss mode) and /dev/ida/c0d0 (ida mode). This is usually good enough for most modern systems. 
 
 
 TODO:
-Robert says:
-you asked me for features...at least I would like to get the product name (from the board id)
-drive array size, fault tolerance (RAID etc) and maybe recovery status in % when available
-I dunno, whether it's possible to read serial number. But ROM version/backup rom would be also useful for activity with the HP support
+Report mode including;
+Product name (boardid)
+Drive array size, fault tolerance (RAID etc) and maybe recovery status in % when available
+Serial number. But ROM version/backup rom would be also useful for activity with the HP support

@@ -31,9 +31,12 @@
 #include <sys/ioctl.h>
 #include <malloc.h>
 #include <getopt.h>
+#include <errno.h>
 
 #include <linux/compiler.h>
 #include <linux/cciss_ioctl.h>
+
+#include <ida_ioctl.h>
 
 #include "cciss_events.h"
 
@@ -44,6 +47,24 @@ typedef struct _logdrv_state {
   char *message;
   int severity;
 } logdrv_state;
+
+typedef struct _logdrv {
+  char *devicestr;  /* filesystem device node eg. /dev/cciss/c0d0 */
+  int type; /* type of controller eg. CCISS or IDA */
+  int drvnum; /* number of this logical drive */
+  logdrv_state state; /* current state of this logical drive */
+} logdrv;
+
+/* globals */
+int verbose = 0;
+
+/* macros */
+#define log(format,...) \
+    if (verbose) { printf (format, __VA_ARGS__); }
+
+/* defines */
+#define CTTYPE_CCISS 1
+#define CTTYPE_IDA 2
 
 int
 cciss_get_event (int device_fd, int reset_pointer, cciss_event_type * event)
@@ -278,11 +299,174 @@ cciss_print_logicalluns(cciss_report_logicallun_struct logluns) {
 	  cciss_get_num_logicalluns(logluns));
 }
 
+
+/* get the drivestates for logical drives attached to this controller
+ * result:
+ * >0 number of logical drives found
+ * 0 no logical drives detected
+ * <0 error while trying to get states, see log message
+ */
+int
+cciss_get_drivestates (char *device, logdrv *logdrvs, int maxlogdrvs)
+{
+  int fd;
+  cciss_report_logicallun_struct logluns;
+  int num_logical_drives;
+  int counter;
+  int result;
+  cciss_event_type event;
+
+  fd = open(device, O_RDWR);
+  if (fd < 0) {
+    log ("failed to open device %s: %s\n", device, strerror(errno));
+    return -1;
+  }
+
+  log ("Retrieving logical drive information from controller %s\n", device);
+  if (cciss_get_logical_luns(fd, &logluns) < 0) {
+    log ("Retrieval of cciss logical lun data failed (%d)\n", result);
+    return -1;
+  }
+
+  if (verbose) {
+    cciss_print_logicalluns(logluns);
+  }
+  num_logical_drives = cciss_get_num_logicalluns(logluns);
+
+  log ("Controller %s reports %d logical drives\n", device, num_logical_drives);
+
+  for (counter = 0; counter < num_logical_drives; counter++) {
+    logdrvs[counter].devicestr = (char *)malloc(strlen(device)+1);
+    strcpy(logdrvs[counter].devicestr, device);
+    logdrvs[counter].type = CTTYPE_CCISS;
+    logdrvs[counter].drvnum = counter;
+    logdrvs[counter].state.state = 0;
+    log ("Logical drive %d found on controller %s\n", counter, device);
+  }
+
+  int first_time = 1;
+  do 
+    {
+      result = cciss_get_event (fd, first_time, &event);
+      if (CompareEvent(event, 5,0,0)) {
+	/* i'm only interested in logical drive state for now */
+	int drivenum = event.detail.logstatchange.logicaldrivenumber;
+	logdrvs[drivenum].state.state = event.detail.logstatchange.newlogicaldrivestate;
+	logdrvs[drivenum].state.severity = logicaldrivestatusseverity[event.detail.logstatchange.newlogicaldrivestate];
+	logdrvs[drivenum].state.message = (char *)malloc(strlen(logicaldrivestatusstr[event.detail.logstatchange.newlogicaldrivestate] + 1));
+	strcpy (logdrvs[drivenum].state.message, logicaldrivestatusstr[event.detail.logstatchange.newlogicaldrivestate]);
+      }
+      if (verbose) {
+	cciss_print_event (event);
+	printf ("\n");
+      }
+      first_time = 0;
+    }
+  while (event.class.class != 0);
+
+  return num_logical_drives;
+}
+
+int
+ida_get_num_logicalluns (int devicefd)
+{
+  ida_ioctl_t io;
+  char buffer[30];
+  int cntr;
+
+
+  /* clear io */
+  memset (&io, 0, sizeof (io));
+
+  io.cmd = ID_CTLR;
+
+  if (ioctl (devicefd, IDAPASSTHRU, &io) < 0)
+    {
+      log ("Error in ida ioctl: %s\n", strerror(errno)); 
+      return -1;
+    }
+
+  //boardid2str (io.c.id_ctlr.board_id, buffer);
+
+  return io.c.id_ctlr.nr_drvs;
+}
+
+int
+ida_get_drivestate(int devicefd, int logicaldrv)
+{
+  ida_ioctl_t io;
+  ida_ioctl_t io2;
+  int nr_blks, blks_tr;
+
+  memset (&io, 0, sizeof (io));
+
+  io.cmd = ID_LOG_DRV;
+  io.unit = logicaldrv | UNITVALID;
+
+  if (ioctl (devicefd, IDAPASSTHRU, &io) < 0)
+    {
+      log ("FATAL: ID_LOG_DRV ioctl failed: %s", strerror(errno));
+      return -1;
+    }
+
+  memset (&io2, 0, sizeof (io2));
+
+  io2.cmd = SENSE_LOG_DRV_STAT;
+  io2.unit = logicaldrv | UNITVALID;
+
+  if (ioctl (devicefd, IDAPASSTHRU, &io2) < 0)
+    {
+      log ("FATAL: SENSE_LOG_DRV_STAT ioctl failed: %s", strerror(errno));
+      return -1;
+    }
+
+  return io2.c.sense_log_drv_stat.status;
+}
+
+int
+ida_get_drivestates (char *device, logdrv *logdrvs, int maxlogdrvs)
+{
+  int fd;
+  int num_logical_drives;
+  int counter;
+  int result;
+
+  fd = open(device, O_RDWR);
+  if (fd < 0) {
+    log ("failed to open device %s: %s\n", device, strerror(errno));
+    return -1;
+  }
+
+  num_logical_drives = ida_get_num_logicalluns(fd);
+  if (num_logical_drives < 0) {
+    log ("ioctl failed to retrieve number of logical drives\n", NULL);
+    return -1;
+  }
+
+  for (counter = 0; counter < num_logical_drives; counter++) {
+    result = ida_get_drivestate (fd, counter);
+    if (result < 0) {
+      log ("Error while retrieving state information (%d)\n", result);
+      result = 0; /* we should set this to a critical state */
+    }
+    logdrvs[counter].devicestr = (char *)malloc(strlen(device)+1);
+    strcpy(logdrvs[counter].devicestr, device);
+    logdrvs[counter].type = CTTYPE_IDA;
+    logdrvs[counter].drvnum = counter;
+    logdrvs[counter].state.state = result;
+    logdrvs[counter].state.severity = logicaldrivestatusseverity[result];
+    logdrvs[counter].state.message = (char *)malloc(strlen(logicaldrivestatusstr[result] + 1));
+    strcpy(logdrvs[counter].state.message, logicaldrivestatusstr[result]);
+    log ("Logical drive %d found on controller %s\n", counter, device);
+  }
+
+  return num_logical_drives;
+} 
+
 int
 main (int argc, char *argv[])
 {
 	cciss_event_type event;
-	cciss_report_logicallun_struct logluns;
 	logdrv_state *states;
 	int fd, option;
 	int simulate = 0;
@@ -290,8 +474,10 @@ main (int argc, char *argv[])
 	int report_mode = 0;
 	int num_logical_drives = 0;
 	int reset_event_pointer = 1;
+	int result;
+	int ida_device = 0; /* only for use with -f , used to determine protocol to use */
 
-	while ((option = getopt (argc, argv, "f:srho")) != EOF)
+	while ((option = getopt (argc, argv, "f:srhoi")) != EOF)
 	{
 		switch (option)
 		{
@@ -304,109 +490,106 @@ main (int argc, char *argv[])
 			break;
 		case 'r':
 			report_mode = 1;
+			verbose = 1;
 			break;
 		case 'o':
 		  reset_event_pointer = 0;
+		  break;
+		case 'i':
+		  ida_device = 1;
 		  break;
 		case 'h':
 		default:
 			printf ("Usage: ccissprobe [-f filename] [-s]\n");
 			printf (" -f <device>  : device to open\n");
 			/* printf (" -s             : simultion mode (use with -f)\n"); */
-			printf (" -r             : report mode\n");
-			printf (" -o             : only read new events (since last run)\n");
+			printf (" -r             : report (verbose) mode\n");
+			printf (" -o             : only read new events (since last run, CCISS devices only)\n");
+			printf (" -i             : force ida ioctls. (use with -f if the device is supported by the ida driver)");
 			exit (1);
 		}
 	}
 
-	if (filename == NULL)
-	{
-		fd = open ("/dev/cciss/c0d0", O_RDWR);
-	}
-	else
-	{
-		fd = open (filename, O_RDWR);
-	}
-	if (fd < 0)
-	{
-		perror (" * controller open failed");
-		exit (2);
-	}
-	if (report_mode) {
-	  printf ("CCISS probe\n");
-	  printf (" * opening device.\n");
-	  printf (" * device c0d0 opened.\n");
-	}
 
-	if (simulate != 1) {
-	  cciss_get_logical_luns(fd, &logluns);
-	  if (report_mode) {
-	    cciss_print_logicalluns(logluns);
+	/* prepare structures */
+	int max_logical = 64; /* hardcoded */
+	int cur_logical = 0; /* number of drives detected */
+	logdrv *logdrvs = (logdrv *)malloc(sizeof(logdrv)*max_logical);
+
+	/* If a device is supplied on the commandline use that device,
+	 * otherwise scan for devices in all known places
+	 */
+	if (filename != NULL)
+	{
+	  if (ida_device) {
+	    result = ida_get_drivestates(filename, logdrvs, max_logical);
+	    if (result > 0) {
+	      cur_logical += result;
+	    }
 	  }
-	  num_logical_drives = cciss_get_num_logicalluns(logluns);
+	  else {
+	    result = cciss_get_drivestates(filename, logdrvs, max_logical);
+	    if (result > 0) {
+	      cur_logical += result;
+	    }
+	  }
 	}
 	else {
-	  /* set to 8 logical drives in simulation mode */
-	  num_logical_drives = 8;
-	}
-	states = (logdrv_state *)malloc(num_logical_drives * sizeof(logdrv_state));
-	bzero(states, num_logical_drives * sizeof(logdrv_state));
-
-	int first_time = 1;
-	do 
-	  {
-	    if (simulate)
-	      {
-		cciss_simulate_get_event (fd, reset_event_pointer && first_time, &event);
-	      }
-	    else
-	      {
-		cciss_get_event (fd, reset_event_pointer && first_time, &event);
-	      }
-	    if (CompareEvent(event, 5,0,0)) {
-	      /* i'm only interested in logical drive state for now */
-	      int drivenum = event.detail.logstatchange.logicaldrivenumber;
-	      states[drivenum].state = event.detail.logstatchange.newlogicaldrivestate;
-	      states[drivenum].severity = logicaldrivestatusseverity[event.detail.logstatchange.newlogicaldrivestate];
-	      states[drivenum].message = (char *)malloc(strlen(logicaldrivestatusstr[event.detail.logstatchange.newlogicaldrivestate] + 1));
-	      strcpy (states[drivenum].message, logicaldrivestatusstr[event.detail.logstatchange.newlogicaldrivestate]);
-	    }
-	    if (report_mode) {
-	      cciss_print_event (event);
-	      printf ("\n");
-	    }
-	    first_time = 0;
+	  /* if nothing is supplied on the commandline check the first cciss controller and the first ida controller */
+	  result = cciss_get_drivestates("/dev/cciss/c0d0", logdrvs, max_logical);
+	  if (result > 0) {
+	    cur_logical += result;
 	  }
-	while (event.class.class != 0);
+	  result = ida_get_drivestates("/dev/ida/c0d0", logdrvs, max_logical);
+	  if (result > 0) {
+	    cur_logical += result;
+	  }
+	}
 
+	if (cur_logical == 0) {
+	  /* no logical drives found, this is bad */
+	  printf ("CRITICAL no logical drives detected\n");
+	  return (2);
+	}
 
 	/* Nagios part
 	 * nagios wants only one line with a status, so we print the worst situation we can find
 	 * and exit with a corresponding return code
          */
-	int worst_lun;
+	num_logical_drives = 0;
+	int worst_disk;
         int worst_sev = SEV_NORMAL;
 	int cntr;
-	for (cntr = 0; cntr<num_logical_drives; cntr++) {
-	  if (states[cntr].state != 0) {
-	    if (states[cntr].severity > worst_sev) {
-	      worst_sev = states[cntr].severity;
-	      worst_lun = cntr;
+	for (cntr = 0; cntr<cur_logical; cntr++) {
+	  if (logdrvs[cntr].state.state != 0) {
+	    if (logdrvs[cntr].state.severity > worst_sev) {
+	      worst_sev = logdrvs[cntr].state.severity;
+	      worst_disk = cntr;
 	    }
+	  }
+	  if (verbose) {
+	    printf ("Logical drive %d on controller %s has state %d\n", 
+		    logdrvs[cntr].drvnum, 
+		    logdrvs[cntr].devicestr, 
+		    logdrvs[cntr].state.state);
 	  }
 	}
 
-	close (fd);
-
 	if (worst_sev == SEV_CRITICAL) {
-	  printf ("CRITICAL Arrayprobe Logical drive %d: %s\n", worst_lun, states[worst_lun].message);
+	  printf ("CRITICAL Arrayprobe Logical drive %d on %s: %s\n", 
+		  logdrvs[worst_disk].drvnum, 
+		  logdrvs[worst_disk].devicestr, 
+		  logdrvs[worst_disk].state.message);
 	  return 2;
 	}
 	else if (worst_sev == SEV_WARNING) {
-	  printf ("WARNING Arrayprobe Logical drive %d: %s\n", worst_lun, states[worst_lun].message);
+	  printf ("WARNING Arrayprobe Logical drive %d on %s: %s\n", 
+		  logdrvs[worst_disk].drvnum,
+		  logdrvs[worst_disk].devicestr,
+		  logdrvs[worst_disk].state.message);
 	  return 1;
 	}
 
-	printf ("OK Arrayprobe All drives ok\n");
+	printf ("OK Arrayprobe All controllers ok\n");
 	return 0;
 }

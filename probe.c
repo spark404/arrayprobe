@@ -315,6 +315,7 @@ cciss_get_drivestates (char *device, logdrv *logdrvs, int maxlogdrvs)
   int counter;
   int result;
   cciss_event_type event;
+  int first_time;
 
   fd = open(device, O_RDWR);
   if (fd < 0) {
@@ -344,7 +345,7 @@ cciss_get_drivestates (char *device, logdrv *logdrvs, int maxlogdrvs)
     log ("Logical drive %d found on controller %s\n", counter, device);
   }
 
-  int first_time = 1;
+  first_time = 1;
   do 
     {
       result = cciss_get_event (fd, first_time, &event);
@@ -476,6 +477,12 @@ main (int argc, char *argv[])
 	int reset_event_pointer = 1;
 	int result;
 	int ida_device = 0; /* only for use with -f , used to determine protocol to use */
+	int max_logical = 64; /* hardcoded */
+	int cur_logical = 0; /* number of drives detected */
+	logdrv *logdrvs = (logdrv *)malloc(sizeof(logdrv)*max_logical);
+	int worst_disk;
+        int worst_sev = SEV_NORMAL;
+	int cntr;
 
 	while ((option = getopt (argc, argv, "f:srhoi")) != EOF)
 	{
@@ -510,11 +517,8 @@ main (int argc, char *argv[])
 		}
 	}
 
-
 	/* prepare structures */
-	int max_logical = 64; /* hardcoded */
-	int cur_logical = 0; /* number of drives detected */
-	logdrv *logdrvs = (logdrv *)malloc(sizeof(logdrv)*max_logical);
+	logdrvs = (logdrv *)malloc(sizeof(logdrv)*max_logical);
 
 	/* If a device is supplied on the commandline use that device,
 	 * otherwise scan for devices in all known places
@@ -557,9 +561,6 @@ main (int argc, char *argv[])
 	 * and exit with a corresponding return code
          */
 	num_logical_drives = 0;
-	int worst_disk;
-        int worst_sev = SEV_NORMAL;
-	int cntr;
 	for (cntr = 0; cntr<cur_logical; cntr++) {
 	  if (logdrvs[cntr].state.state != 0) {
 	    if (logdrvs[cntr].state.severity > worst_sev) {
